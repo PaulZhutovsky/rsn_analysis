@@ -49,7 +49,13 @@ def evaluate_prediction(y_true, y_pred, y_score):
     return [accuracy, auc, f1, recall, precision, sensitivity, specificity]
 
 
-def scale_data(train, test):
+def scale_data(train, test, experimental=True):
+    if experimental:
+        # Idea proposed by Guido: standardize each network for each subject individually
+        train_scaled = (train - train.mean(axis=1)[:, np.newaxis])/train.std(axis=1)[:, np.newaxis]
+        test_scaled = (test - test.mean(axis=1)[:, np.newaxis])/test.std(axis=1)[:, np.newaxis]
+        return train_scaled, test_scaled
+
     scaler = MinMaxScaler(feature_range=(-1, 1))
 
     # determine mean and variance on training set (scale training set with it)
@@ -66,7 +72,6 @@ def feature_selection(train, test, y_train, z_thresh=3.5):
     mean_group_1 = train[y_train.astype('bool')].mean(axis=0)
     mean_group_2 = train[~y_train.astype('bool')].mean(axis=0)
 
-    # [WIP] maybe how it works...
     mean_diffs = mean_group_1 - mean_group_2
     z_scores_diffs = (mean_diffs - mean_diffs.mean())/mean_diffs.std()
 
