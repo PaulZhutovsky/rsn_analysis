@@ -10,10 +10,13 @@ import os
 import pandas as pd
 from time import time
 
+
+EVALUATION_FILE_SAVE='evaluation_classifier_{}.npz'.format(int(time()))
 EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity']
 PATH_FILELIST = '/data/pzhutovsky/fMRI_data/Oxytosin_study/ICA_group_linearReg.gica/.filelist'
 FOLDER_IC_DR = '/data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN'
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
+EXPERIMENTAL_SCALING = True
 NUM_ICS = 70
 
 
@@ -49,7 +52,7 @@ def evaluate_prediction(y_true, y_pred, y_score):
     return [accuracy, auc, f1, recall, precision, sensitivity, specificity]
 
 
-def scale_data(train, test, experimental=True):
+def scale_data(train, test, experimental=EXPERIMENTAL_SCALING):
     if experimental:
         # Idea proposed by Guido: standardize each network for each subject individually
         train_scaled = (train - train.mean(axis=1)[:, np.newaxis])/train.std(axis=1)[:, np.newaxis]
@@ -175,4 +178,4 @@ if __name__ == '__main__':
     y_labels = get_label()
 
     eval_meta, eval_svm, eval_lab = perform_CV(y_labels)
-    np.savez_compressed('evaluation_classifier.npz', eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab)
+    np.savez_compressed(EVALUATION_FILE_SAVE, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab)
