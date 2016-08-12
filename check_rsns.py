@@ -7,11 +7,11 @@ USAGE:
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import nibabel as nib
 from rsn_classification import load_IC
 from rsn_classification import BASE_IC_NAME
 import os.path as osp
 import os
+from glob import glob
 from docopt import docopt
 
 
@@ -32,8 +32,12 @@ def check_folder(folder_path):
         os.makedirs(folder_path)
 
 
-def get_num_ic(folder_path):
-    return len(os.listdir(folder_path))
+def get_ic_nums(folder_path):
+    networks_files = np.array(glob(osp.join(folder_path, 'dr*.nii.gz')))
+    networks_files_no_file_ext = np.core.defchararray.partition(networks_files, '.')[:, 0]
+    ic_names_str = np.core.defchararray.rpartition(networks_files_no_file_ext, '_')[:, -1]
+    id_ics = np.sort(np.core.defchararray.replace(ic_names_str, 'ic', '').astype(np.int))
+    return id_ics
 
 
 def make_boxplot(data, num_ic, file_name):
@@ -76,30 +80,30 @@ def main(args):
 
     figure_folder = osp.join(FIGURE_FOLDER, folder_rsn)
     check_folder(figure_folder)
-    total_ics = get_num_ic(folder_rsn)
+    ic_nums = get_ic_nums(folder_rsn)
     correlations_across_subj_for_rsn = []
     amount_of_zeros_across_subj_for_rsn = []
 
-    for id_rsn in xrange(total_ics):
-        print '{}/{}'.format(id_rsn + 1, total_ics)
-        path_rsn = osp.join(folder_rsn, get_ic_filename(id_rsn))
+    for id_rsn, ic_num in enumerate(ic_nums):
+        print '{}/{}'.format(id_rsn + 1, ic_nums.size)
+        path_rsn = osp.join(folder_rsn, get_ic_filename(ic_num))
         IC_network = load_IC(path_rsn)
         IC_network = reshape_network(IC_network)
         IC_network = remove_zeros(IC_network)
 
         plt.figure(figsize=(20, 10))
-        make_boxplot(IC_network.T, id_rsn + 1, osp.join(figure_folder, 'boxplot_ic_{}.png'.format(id_rsn + 1)))
+        make_boxplot(IC_network.T, ic_num + 1, osp.join(figure_folder, 'boxplot_ic_{}.png'.format(ic_num + 1)))
         plt.figure()
         correlations_across_subj_for_rsn.append(compute_correlations(IC_network))
 
-        make_histogram(correlations_across_subj_for_rsn[id_rsn], id_rsn + 1,
-                       osp.join(figure_folder, 'corr_ic_{}.png'.format(id_rsn + 1)),
+        make_histogram(correlations_across_subj_for_rsn[id_rsn], ic_num + 1,
+                       osp.join(figure_folder, 'corr_ic_{}.png'.format(ic_num + 1)),
                        'Correlations between RSN of subjects')
 
         plt.figure()
         amount_of_zeros_across_subj_for_rsn.append(compute_amount_zeros(IC_network))
-        make_histogram(amount_of_zeros_across_subj_for_rsn[id_rsn], id_rsn + 1,
-                       osp.join(figure_folder, 'zeros_ic_{}.png'.format(id_rsn + 1)),
+        make_histogram(amount_of_zeros_across_subj_for_rsn[id_rsn], ic_num + 1,
+                       osp.join(figure_folder, 'zeros_ic_{}.png'.format(ic_num + 1)),
                        'Proportion of 0s across voxels', bins=100)
 
         plt.close('all')
