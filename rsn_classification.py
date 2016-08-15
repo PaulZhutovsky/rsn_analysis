@@ -3,15 +3,15 @@ Runs the RSN classification
 
 Usage:
     rsn_classification -h | --help
-    rsn_classification [--path_filelist=<FILELIST> | --folder_IC=<FOLDER_IC> | --save_file_name=<SAVE>]
+    rsn_classification [--path_labels=<FILELIST> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE>]
 
 Options:
     -h --help                   Show this message
-    --path_filelist=<FILELIST>  Path to the filelist
-                                [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/ICA_group_linearReg.gica/.filelist]
+    --path_labels=<FILELIST>    Path to the labels
+                                [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/ICA_group_linearReg.gica/ptsd_controls.txt]
     --folder_IC=<FOLDER_IC>     Path to the ICs to use for classification
                                 [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN]
-    --save_file_name=<SAVE>     Save name for the evaluation of classifier
+    --save_file=<SAVE_FILE>     Save name for the evaluation of classifier
 """
 
 import numpy as np
@@ -22,19 +22,22 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score
 import os.path as osp
-import os
 from glob import glob
-import pandas as pd
 from time import time
 from docopt import docopt
 
 
 EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity']
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
-EXPERIMENTAL_SCALING = False
+EXPERIMENTAL_SCALING = True
 
 
 def get_ic_nums(folder_path):
+    """
+    Has to be done in this way because some ICs might be missing (numbering might be not sequential)
+    :param folder_path:
+    :return:
+    """
     networks_files = np.array(glob(osp.join(folder_path, 'dr_stage2_ic*.nii.gz')))
     networks_files_no_file_ext = np.core.defchararray.partition(networks_files, '.')[:, 0]
     ic_names_str = np.core.defchararray.rpartition(networks_files_no_file_ext, '_')[:, -1]
@@ -50,7 +53,6 @@ def load_ic(ic_path):
 
 def build_classifier_svm(data, labels, **kwargs):
     svm = SVC(**kwargs)
-    # svm = LinearSVC(penalty='l1', loss='logistic_regression', dual=False)
     svm.fit(data, labels)
     return svm, svm.decision_function(data)
 
@@ -76,10 +78,9 @@ def evaluate_prediction(y_true, y_pred, y_score):
 
 def scale_data(train, test, experimental=EXPERIMENTAL_SCALING):
     if experimental:
-        # Idea proposed by Guido: standardize each network for each subject individually
-        train_scaled = (train - train.mean(axis=1)[:, np.newaxis])/train.std(axis=1)[:, np.newaxis]
-        test_scaled = (test - test.mean(axis=1)[:, np.newaxis])/test.std(axis=1)[:, np.newaxis]
-        return train_scaled, test_scaled
+        # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
+        train = (train - train.mean(axis=1)[:, np.newaxis])/train.std(axis=1)[:, np.newaxis]
+        test = (test - test.mean(axis=1)[:, np.newaxis])/test.std(axis=1)[:, np.newaxis]
 
     scaler = MinMaxScaler(feature_range=(-1, 1))
 
@@ -193,21 +194,8 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
     return evaluations_metaclf, evaluation_svm, evaluation_labels
 
 
-def get_label(filelist_path):
-    """
-    General intuition: check in the .filelist which was used to compute the dual_regression (assuming that the order is
-    the same) and extract the information on the P (patient) vs. C (control) folder naming of the data
-    Returns label vector
-    -------
-    """
-    filelist = pd.read_table(filelist_path, header=None).squeeze()
-    filelist = filelist.str.split(os.sep)
-    # filter for subject folder which starts with either C (controls) or P (patients) to get the right index
-    id_subj_folder = [index for index, sub_folder in enumerate(filelist.loc[0])
-                      if sub_folder.startswith('C') or sub_folder.startswith('P')][0]
-    subj_folders = filelist.str[id_subj_folder]
-    # patients will be coded as 1 and controls as 0
-    return subj_folders.str.startswith('P').values.astype(np.int)
+def get_label(labels_path):
+    return np.loadtxt(labels_path).astype(np.int)
 
 
 def set_file_name_eval(file_name):
@@ -219,12 +207,11 @@ def set_file_name_eval(file_name):
 
 def main(args):
     folder_ic = args['--folder_IC']
-    filelist_path = args['--filelist']
-    save_eval_name = set_file_name_eval(args['--save_file_name'])
+    labels_path = args['--path_labels']
+    save_eval_name = set_file_name_eval(args['--save_file'])
 
-    y_labels = get_label(filelist_path=filelist_path)
+    y_labels = get_label(labels_path=labels_path)
     ic_given = get_ic_nums(folder_path=folder_ic)
-
     cv_instance = get_cv_instance(y_labels=y_labels)
 
     eval_meta, eval_svm, eval_lab = perform_cross_validation(y_labels=y_labels, cv=cv_instance, ic_to_take=ic_given,
