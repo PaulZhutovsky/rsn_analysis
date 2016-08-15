@@ -16,7 +16,7 @@ EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivit
 PATH_FILELIST = '/data/pzhutovsky/fMRI_data/Oxytosin_study/ICA_group_linearReg.gica/.filelist'
 FOLDER_IC_DR = '/data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN'
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
-EXPERIMENTAL_SCALING = True
+EXPERIMENTAL_SCALING = False
 NUM_ICS = 70
 
 
@@ -71,6 +71,15 @@ def scale_data(train, test, experimental=EXPERIMENTAL_SCALING):
     return train_scaled, test_scaled
 
 
+def load_mask(folder_mask=FOLDER_IC_DR):
+    mask = nib.load(osp.join(folder_mask, 'mask.nii.gz'))
+    return mask.get_data().astype(np.bool)
+
+
+def mask_data(IC_network, mask):
+    return IC_network[mask, :]
+
+
 def feature_selection(train, test, y_train, z_thresh=3.5):
     mean_group_1 = train[y_train.astype('bool')].mean(axis=0)
     mean_group_2 = train[~y_train.astype('bool')].mean(axis=0)
@@ -93,6 +102,7 @@ def perform_CV(y_labels, n_iter=1000, test_size=0.2, num_ics=NUM_ICS, evaluation
     num_subj = y_labels.size
     evaluations_metaclf = np.zeros((n_iter, len(evaluation_labels)))
     evaluation_svm = np.zeros((n_iter, num_ics, len(evaluation_labels)))
+    mask = load_mask()
 
     for id_iter, (train_index, test_index) in enumerate(sss):
         print
@@ -115,9 +125,11 @@ def perform_CV(y_labels, n_iter=1000, test_size=0.2, num_ics=NUM_ICS, evaluation
             t1_IC = time()
 
             IC_component = load_IC(osp.join(FOLDER_IC_DR, BASE_IC_NAME.format(id_IC)))
+            IC_component = mask_data(IC_component, mask).T
 
             # make a vector out of the component
-            IC_component = IC_component.reshape((-1, num_subj)).T
+            # IC_component = IC_component.reshape((-1, num_subj)).T
+
 
             IC_train = IC_component[train_index, :]
             IC_test = IC_component[test_index, :]
@@ -151,7 +163,7 @@ def perform_CV(y_labels, n_iter=1000, test_size=0.2, num_ics=NUM_ICS, evaluation
         log_reg = build_classifier_lr(train_data_meta, label_train)
 
         evaluations_metaclf[id_iter, :] = evaluate_prediction(y_true=label_test, y_pred=log_reg.predict(test_data_meta),
-                                                              y_score=log_reg.predict_proba(test_data_meta)[:, 0])
+                                                              y_score=log_reg.predict_proba(test_data_meta)[:, 1])
         print_evaluation(evaluations_metaclf[id_iter, :])
 
     return evaluations_metaclf, evaluation_svm, evaluation_labels
