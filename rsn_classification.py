@@ -3,11 +3,11 @@ Runs the RSN classification
 
 Usage:
     rsn_classification -h | --help
-    rsn_classification [--path_labels=<FILELIST> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE>]
+    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE>]
 
 Options:
     -h --help                   Show this message
-    --path_labels=<FILELIST>    Path to the labels
+    --path_labels=<LABELS>      Path to the labels
                                 [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/ICA_group_linearReg.gica/ptsd_controls.txt]
     --folder_IC=<FOLDER_IC>     Path to the ICs to use for classification
                                 [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN]
@@ -29,7 +29,7 @@ from docopt import docopt
 
 EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity']
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
-EXPERIMENTAL_SCALING = True
+EXPERIMENTAL_SCALING = False
 
 
 def get_ic_nums(folder_path):
@@ -79,8 +79,8 @@ def evaluate_prediction(y_true, y_pred, y_score):
 def scale_data(train, test, experimental=EXPERIMENTAL_SCALING):
     if experimental:
         # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
-        train = (train - train.mean(axis=1)[:, np.newaxis])/train.std(axis=1)[:, np.newaxis]
-        test = (test - test.mean(axis=1)[:, np.newaxis])/test.std(axis=1)[:, np.newaxis]
+        train = (train - train.mean(axis=0)[np.newaxis, :])/train.std(axis=0)[np.newaxis, :]
+        test = (test - test.mean(axis=0)[np.newaxis, :])/test.std(axis=0)[np.newaxis, :]
 
     scaler = MinMaxScaler(feature_range=(-1, 1))
 
@@ -111,7 +111,7 @@ def feature_selection(train, test, y_train, z_thresh=3.5):
     z_scores_diffs = (mean_diffs - mean_diffs.mean())/mean_diffs.std()
 
     chosen_ftrs = np.abs(z_scores_diffs) >= z_thresh
-    print 'Features picked" {}/{}'.format(chosen_ftrs.sum(), chosen_ftrs.size)
+    print 'Features picked: {}/{}'.format(chosen_ftrs.sum(), chosen_ftrs.size)
 
     return train[:, chosen_ftrs], test[:, chosen_ftrs]
 
