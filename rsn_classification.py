@@ -3,7 +3,7 @@ Runs the RSN classification
 
 Usage:
     rsn_classification -h | --help
-    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE>]
+    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE> --standardize --z_thresh=<Z_VAL>]
 
 Options:
     -h --help                   Show this message
@@ -12,6 +12,9 @@ Options:
     --folder_IC=<FOLDER_IC>     Path to the ICs to use for classification
                                 [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN]
     --save_file=<SAVE_FILE>     Save name for the evaluation of classifier
+    --standardize               Whether to standardize the networks (per subject) before applying -1, 1 scaling
+    --z_thresh=<Z_VAL>          What the z-threshold for the feature selection should be [default: 3.5]
+
 """
 
 import numpy as np
@@ -27,9 +30,9 @@ from time import time
 from docopt import docopt
 
 
-EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity']
+EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision',
+                     'sensitivity', 'specificity', 'positive predictive value']
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
-EXPERIMENTAL_SCALING = False
 
 
 def get_ic_nums(folder_path):
@@ -51,14 +54,15 @@ def load_ic(ic_path):
     return ic_component.astype(np.float64)
 
 
-def build_classifier_svm(data, labels, **kwargs):
-    svm = SVC(**kwargs)
+def build_classifier_svm(data, labels, kernel='linear', class_weight='balanced', **kwargs):
+    svm = SVC(kernel=kernel, class_weight=class_weight, **kwargs)
     svm.fit(data, labels)
     return svm, svm.decision_function(data)
 
 
 def build_classifier_lr(data, labels, **kwargs):
-    log_reg = LogisticRegressionCV(penalty='l1', cv=10, solver='liblinear', refit=False, n_jobs=10, verbose=1, **kwargs)
+    log_reg = LogisticRegressionCV(penalty='l1', Cs=100, cv=10, solver='liblinear', refit=False, n_jobs=10, verbose=1,
+                                   class_weight='balanced', scoring='roc_auc', **kwargs)
     log_reg.fit(data, labels)
     return log_reg
 
@@ -71,16 +75,14 @@ def evaluate_prediction(y_true, y_pred, y_score):
     precision = precision_score(y_true=y_true, y_pred=y_pred)
     sensitivity = recall
     # noinspection PyTypeChecker
-    specificity = np.sum((y_true == 0) & (y_pred == 0))/float(np.sum(y_pred == 0))
+    specificity = np.sum((y_true == 0) & (y_pred == 0))/float(np.sum(y_true == 0))
+    # noinspection PyTypeChecker
+    PPV = np.sum((y_true == 1) & (y_pred == 1))/float(np.sum(y_pred == 1))
 
-    return [accuracy, auc, f1, recall, precision, sensitivity, specificity]
+    return [accuracy, auc, f1, recall, precision, sensitivity, specificity, PPV]
 
 
-def scale_data(train, test, experimental=EXPERIMENTAL_SCALING):
-    if experimental:
-        # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
-        train = (train - train.mean(axis=0)[np.newaxis, :])/train.std(axis=0)[np.newaxis, :]
-        test = (test - test.mean(axis=0)[np.newaxis, :])/test.std(axis=0)[np.newaxis, :]
+def scale_data(train, test):
 
     scaler = MinMaxScaler(feature_range=(-1, 1))
 
@@ -99,8 +101,14 @@ def load_mask(folder_mask):
     return mask.get_data().astype(np.bool)
 
 
-def mask_data(ic_network, mask):
-    return ic_network[mask, :]
+def mask_data(ic_network, mask, standardize=False):
+    tmp = ic_network[mask, :].T
+
+    if standardize:
+        # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
+        tmp = (tmp - tmp.mean(axis=1)[:, np.newaxis]) / tmp.std(axis=1)[:, np.newaxis]
+
+    return tmp
 
 
 def feature_selection(train, test, y_train, z_thresh=3.5):
@@ -118,14 +126,15 @@ def feature_selection(train, test, y_train, z_thresh=3.5):
 
 def print_evaluation(eval_metrics):
     print 'Accuracy: {:.2f}, AUC: {:.2f}, F1-score: {:.2f}, Recall: {:.2f}, ' \
-          'Precision: {:.2f}, Sensitivity: {:.2f}, Specificity {:.2f}'.format(*eval_metrics)
+          'Precision: {:.2f}, Sensitivity: {:.2f}, Specificity: {:.2f}, PPV: {:.2f}'.format(*eval_metrics)
 
 
 def get_cv_instance(y_labels, n_iter=1000, test_size=0.2):
     return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
 
 
-def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_labels=EVALUATION_LABELS):
+def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_labels=EVALUATION_LABELS,
+                             standardize=False, z_thresh=3.5):
     n_iter = len(cv)
     num_ic = len(ic_to_take)
     num_subj = y_labels.size
@@ -143,7 +152,6 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
         t1_iter = time()
 
         data_for_metaclf = np.zeros((num_subj, num_ic))
-        svm_clfs = []
 
         label_train, label_test = y_labels[train_index], y_labels[test_index]
 
@@ -154,22 +162,21 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
             t1_ic = time()
 
             ic_component = load_ic(osp.join(folder_ic, BASE_IC_NAME.format(ic_num)))
-            ic_component = mask_data(ic_component, mask).T
+            ic_component = mask_data(ic_component, mask, standardize=standardize)
 
-            ic_train = ic_component[train_index, :]
-            ic_test = ic_component[test_index, :]
+            ic_train, ic_test = ic_component[train_index, :], ic_component[test_index, :]
 
-            ic_train, ic_test = feature_selection(ic_train, ic_test, label_train)
-
+            ic_train, ic_test = feature_selection(ic_train, ic_test, label_train, z_thresh=z_thresh)
             ic_train, ic_test = scale_data(ic_train, ic_test)
 
             print 'Train Set: max={:.2f}, min={:.2f}'.format(ic_train.max(), ic_train.min())
-            print 'Test Set: max={:.2f}, min={:.2f}'.format(ic_test.max(), ic_test.min())
+            print 'Test Set: max(range)=[{:.2f}, {:.2f}], min(range)=[{:.2f}, {:.2f}]'.format(ic_test.max(axis=0).min(),
+                                                                                              ic_test.max(),
+                                                                                              ic_test.min(),
+                                                                                              ic_test.min(axis=0).max())
 
             svm_clf, data_for_metaclf[train_index, id_IC] = build_classifier_svm(ic_train, label_train)
             data_for_metaclf[test_index, id_IC] = svm_clf.decision_function(ic_test)
-
-            svm_clfs.append(svm_clf)
 
             evaluation_svm[id_iter, id_IC, :] = evaluate_prediction(y_true=label_test, y_pred=svm_clf.predict(ic_test),
                                                                     y_score=svm_clf.decision_function(ic_test))
@@ -209,14 +216,19 @@ def main(args):
     folder_ic = args['--folder_IC']
     labels_path = args['--path_labels']
     save_eval_name = set_file_name_eval(args['--save_file'])
+    standardize_networks = args['--standardize']
+    z_thresh = float(args['--z_thresh'])
 
     y_labels = get_label(labels_path=labels_path)
     ic_given = get_ic_nums(folder_path=folder_ic)
     cv_instance = get_cv_instance(y_labels=y_labels)
 
     eval_meta, eval_svm, eval_lab = perform_cross_validation(y_labels=y_labels, cv=cv_instance, ic_to_take=ic_given,
-                                                             folder_ic=folder_ic)
-    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab)
+                                                             folder_ic=folder_ic, standardize=standardize_networks,
+                                                             z_thresh=z_thresh)
+    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab,
+                        ic_labels=ic_given, params_cv={'standardize_network': standardize_networks,
+                                                       'z_thresh': z_thresh})
 
 
 if __name__ == '__main__':
