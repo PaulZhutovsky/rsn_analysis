@@ -3,7 +3,7 @@ Runs the RSN classification
 
 Usage:
     rsn_classification -h | --help
-    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE> --standardize --z_thresh=<Z_VAL>]
+    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE> --standardize --z_thresh=<Z_VAL> --loo]
 
 Options:
     -h --help                   Show this message
@@ -14,12 +14,13 @@ Options:
     --save_file=<SAVE_FILE>     Save name for the evaluation of classifier
     --standardize               Whether to standardize the networks (per subject) before applying -1, 1 scaling
     --z_thresh=<Z_VAL>          What the z-threshold for the feature selection should be [default: 3.5]
+    --loo                       Whether to use leave-one-out cross-validaton
 
 """
 
 import numpy as np
 import nibabel as nib
-from sklearn.cross_validation import StratifiedShuffleSplit
+from sklearn.cross_validation import StratifiedShuffleSplit, LeaveOneOut
 from sklearn.svm import SVC
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegressionCV
@@ -131,8 +132,11 @@ def print_evaluation(eval_metrics):
           'Precision: {:.2f}, Sensitivity: {:.2f}, Specificity: {:.2f}, PPV: {:.2f}'.format(*eval_metrics)
 
 
-def get_cv_instance(y_labels, n_iter=1000, test_size=0.2):
-    return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
+def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
+    if loo:
+        return LeaveOneOut(y_labels.size)
+    else
+        return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
 
 
 def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_labels=EVALUATION_LABELS,
@@ -220,17 +224,19 @@ def main(args):
     save_eval_name = set_file_name_eval(args['--save_file'])
     standardize_networks = args['--standardize']
     z_thresh = float(args['--z_thresh'])
+    do_loo = args['--loo']
 
     y_labels = get_label(labels_path=labels_path)
     ic_given = get_ic_nums(folder_path=folder_ic)
-    cv_instance = get_cv_instance(y_labels=y_labels)
+    cv_instance = get_cv_instance(y_labels=y_labels, loo=do_loo)
 
     eval_meta, eval_svm, eval_lab = perform_cross_validation(y_labels=y_labels, cv=cv_instance, ic_to_take=ic_given,
                                                              folder_ic=folder_ic, standardize=standardize_networks,
                                                              z_thresh=z_thresh)
     np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab,
                         ic_labels=ic_given, params_cv={'standardize_network': standardize_networks,
-                                                       'z_thresh': z_thresh})
+                                                       'z_thresh': z_thresh,
+                                                       'loo': do_loo})
 
 
 if __name__ == '__main__':
