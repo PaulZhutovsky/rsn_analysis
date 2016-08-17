@@ -78,6 +78,8 @@ def evaluate_prediction(y_true, y_pred, y_score):
     specificity = np.sum((y_true == 0) & (y_pred == 0))/float(np.sum(y_true == 0))
     # noinspection PyTypeChecker
     PPV = np.sum((y_true == 1) & (y_pred == 1))/float(np.sum(y_pred == 1))
+    if np.isnan(PPV):
+        PPV = 0.
 
     return [accuracy, auc, f1, recall, precision, sensitivity, specificity, PPV]
 
