@@ -3,7 +3,7 @@ Runs the RSN classification
 
 Usage:
     rsn_classification -h | --help
-    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE> --standardize --z_thresh=<Z_VAL> --loo]
+    rsn_classification [--path_labels=<LABELS> --folder_IC=<FOLDER_IC> --save_file=<SAVE_FILE> --standardize --z_thresh=<Z_VAL> --loo --reg=<REG> --rescale]
 
 Options:
     -h --help                   Show this message
@@ -13,9 +13,11 @@ Options:
                                 [default: /data/pzhutovsky/fMRI_data/Oxytosin_study/dual_regression_beckmann_RSN]
     --save_file=<SAVE_FILE>     Save name for the evaluation of classifier
     --standardize               Whether to standardize the networks (per subject) before applying -1, 1 scaling
+    --rescale                   Rescale the networks (per subject) to -1, 1 globally (after standardization) before scaling indiviudual voxels
     --z_thresh=<Z_VAL>          What the z-threshold for the feature selection should be [default: 3.5]
     --loo                       Whether to use leave-one-out cross-validaton
-
+    --reg=<REG>                 Which kind of regularization to apply for the meta-classifier. Valid options are:
+                                l1, l2, 0 [default: l2]
 """
 
 import numpy as np
@@ -23,17 +25,24 @@ import nibabel as nib
 from sklearn.cross_validation import StratifiedShuffleSplit, LeaveOneOut
 from sklearn.svm import SVC
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score
 import os.path as osp
 from glob import glob
 from time import time
+from evaluation_classifier import Evaluater
 from docopt import docopt
 
 
-EVALUATION_LABELS = ['accuracy', 'AUC', 'F1', 'recall', 'precision',
-                     'sensitivity', 'specificity', 'positive predictive value']
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
+
+
+def get_evaluation_labels(loo=False):
+    if loo:
+        return ['accuracy', 'predictions']
+    else:
+        return ['accuracy', 'balanced_accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity',
+                'positive_predictive_value']
 
 
 def get_ic_nums(folder_path):
@@ -43,15 +52,15 @@ def get_ic_nums(folder_path):
     :return:
     """
     networks_files = np.array(glob(osp.join(folder_path, 'dr_stage2_ic*.nii.gz')))
-    networks_files_no_file_ext = np.core.defchararray.partition(networks_files, '.')[:, 0]
-    ic_names_str = np.core.defchararray.rpartition(networks_files_no_file_ext, '_')[:, -1]
-    id_ics = np.sort(np.core.defchararray.replace(ic_names_str, 'ic', '').astype(np.int))
+    networks_files_no_file_ext = np.char.partition(networks_files, '.')[:, 0]
+    ic_names_str = np.char.rpartition(networks_files_no_file_ext, '_')[:, -1]
+    id_ics = np.sort(np.char.replace(ic_names_str, 'ic', '').astype(np.int))
     return id_ics
 
 
 def load_ic(ic_path):
     ic_component = nib.load(ic_path).get_data()
-    # intentionally convert to float64 to be sure that we have enough bits for the encoding along the way
+    # intentionally convert to float64 to be sure that we have enough bits for the processes along the way
     return ic_component.astype(np.float64)
 
 
@@ -61,15 +70,19 @@ def build_classifier_svm(data, labels, kernel='linear', class_weight='balanced',
     return svm, svm.decision_function(data)
 
 
-def build_classifier_lr(data, labels, **kwargs):
-    log_reg = LogisticRegressionCV(penalty='l1', Cs=100, cv=10, solver='liblinear', refit=False, n_jobs=10, verbose=1,
-                                   class_weight='balanced', scoring='roc_auc', **kwargs)
+def build_classifier_lr(data, labels, regularization='l2', **kwargs):
+    if (regularization == 'l1') or (regularization == 'l2'):
+        log_reg = LogisticRegressionCV(penalty=regularization, Cs=100, cv=10, solver='liblinear', refit=False,
+                                       n_jobs=10, verbose=1, class_weight='balanced', **kwargs)
+    else:
+        log_reg = LogisticRegression(C=0., class_weight='balanced', solver='linlinear', n_jobs=10, verbose=1, **kwargs)
     log_reg.fit(data, labels)
     return log_reg
 
 
 def evaluate_prediction(y_true, y_pred, y_score):
     accuracy = accuracy_score(y_true=y_true, y_pred=y_pred)
+    balanced_accuracy = 0.5 * (((y_true == 1) & (y_pred == 1)).mean() + ((y_true == 0) & (y_pred == 0)).mean())
     auc = roc_auc_score(y_true=y_true, y_score=y_score)
     f1 = f1_score(y_true=y_true, y_pred=y_pred)
     recall = recall_score(y_true=y_true, y_pred=y_pred)
@@ -82,7 +95,7 @@ def evaluate_prediction(y_true, y_pred, y_score):
     if np.isnan(PPV):
         PPV = 0.
 
-    return [accuracy, auc, f1, recall, precision, sensitivity, specificity, PPV]
+    return [accuracy, balanced_accuracy, auc, f1, recall, precision, sensitivity, specificity, PPV]
 
 
 def scale_data(train, test):
@@ -104,12 +117,20 @@ def load_mask(folder_mask):
     return mask.get_data().astype(np.bool)
 
 
-def mask_data(ic_network, mask, standardize=False):
+def mask_data(ic_network, mask, standardize_network=False, min_max_network=False):
+    # after the transpose we have a num_subj x num_voxels_within_brain matrix
     tmp = ic_network[mask, :].T
 
-    if standardize:
-        # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
+    # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
+    if standardize_network:
         tmp = (tmp - tmp.mean(axis=1)[:, np.newaxis]) / tmp.std(axis=1)[:, np.newaxis]
+
+    # 2nd idea proposed by Rajat: rescale the networks per subject to be exactly in the same range (-1, 1)
+    if min_max_network:
+        # 0-1 scale
+        tmp = (tmp - tmp.min(axis=1)[:, np.newaxis]) / (tmp.max(axis=1)[:, np.newaxis] - tmp.min(axis=1)[:, np.newaxis])
+        # -1-1 scale
+        tmp = tmp * 2. - 1.
 
     return tmp
 
@@ -135,17 +156,17 @@ def print_evaluation(eval_metrics):
 def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
     if loo:
         return LeaveOneOut(y_labels.size)
-    else
+    else:
         return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
 
 
-def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_labels=EVALUATION_LABELS,
-                             standardize=False, z_thresh=3.5):
+def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, standardize_network=False,
+                             z_thresh=3.5, regularization='l2', min_max_network=False):
     n_iter = len(cv)
     num_ic = len(ic_to_take)
     num_subj = y_labels.size
-    evaluations_metaclf = np.zeros((n_iter, len(evaluation_labels)))
-    evaluation_svm = np.zeros((n_iter, num_ic, len(evaluation_labels)))
+    evaluations_metaclf = np.zeros((n_iter, len(evaluator.evaluations)))
+    evaluation_svm = np.zeros((n_iter, num_ic, len(evaluator.evaluations)))
     mask = load_mask(folder_ic)
 
     for id_iter, (train_index, test_index) in enumerate(cv):
@@ -166,9 +187,12 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
             print "Current IC: {}/{}".format(id_IC + 1, num_ic)
 
             t1_ic = time()
+            import ipdb; ipdb.set_trace()
 
             ic_component = load_ic(osp.join(folder_ic, BASE_IC_NAME.format(ic_num)))
-            ic_component = mask_data(ic_component, mask, standardize=standardize)
+            # mask and scale the network on subject level if required
+            ic_component = mask_data(ic_component, mask, standardize_network=standardize_network,
+                                     min_max_network=min_max_network)
 
             ic_train, ic_test = ic_component[train_index, :], ic_component[test_index, :]
 
@@ -184,10 +208,11 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
             svm_clf, data_for_metaclf[train_index, id_IC] = build_classifier_svm(ic_train, label_train)
             data_for_metaclf[test_index, id_IC] = svm_clf.decision_function(ic_test)
 
-            evaluation_svm[id_iter, id_IC, :] = evaluate_prediction(y_true=label_test, y_pred=svm_clf.predict(ic_test),
-                                                                    y_score=svm_clf.decision_function(ic_test))
+            evaluation_svm[id_iter, id_IC, :] = evaluator.evaluate_prediction(y_true=label_test,
+                                                                              y_pred=svm_clf.predict(ic_test),
+                                                                              y_score=svm_clf.decision_function(ic_test))
             print 'SVM evaluation:'
-            print_evaluation(evaluation_svm[id_iter, id_IC, :])
+            evaluator.print_evaluation()
 
             print 'Time IC: {:.2f}s'.format(time() - t1_ic)
 
@@ -198,13 +223,14 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluation_lab
         train_data_meta = data_for_metaclf[train_index, :]
         test_data_meta = data_for_metaclf[test_index, :]
 
-        log_reg = build_classifier_lr(train_data_meta, label_train)
+        log_reg = build_classifier_lr(train_data_meta, label_train, regularization=regularization)
 
-        evaluations_metaclf[id_iter, :] = evaluate_prediction(y_true=label_test, y_pred=log_reg.predict(test_data_meta),
-                                                              y_score=log_reg.predict_proba(test_data_meta)[:, 1])
-        print_evaluation(evaluations_metaclf[id_iter, :])
+        evaluations_metaclf[id_iter, :] = evaluator/evaluate_prediction(y_true=label_test,
+                                                                        y_pred=log_reg.predict(test_data_meta),
+                                                                        y_score=log_reg.predict_proba(test_data_meta)[:, 1])
+        evaluator.print_evaluation()
 
-    return evaluations_metaclf, evaluation_svm, evaluation_labels
+    return evaluations_metaclf, evaluation_svm
 
 
 def get_label(labels_path):
@@ -219,24 +245,43 @@ def set_file_name_eval(file_name):
 
 
 def main(args):
+    (do_loo, folder_ic, labels_path, regularization, save_eval_name,
+     min_max_network, standardize_network, z_thresh) = retrieve_parameters(args)
+
+    y_labels = get_label(labels_path=labels_path)
+    ics_given = get_ic_nums(folder_path=folder_ic)
+    cv_instance = get_cv_instance(y_labels=y_labels, loo=do_loo)
+    evaluator = Evaluater(leave_one_out_case=do_loo)
+
+    eval_meta, eval_svm = perform_cross_validation(y_labels=y_labels, cv=cv_instance, ic_to_take=ics_given,
+                                                   folder_ic=folder_ic, evaluator=evaluator,
+                                                   standardize_network=standardize_network,
+                                                   z_thresh=z_thresh, min_max_network=min_max_network,
+                                                   regularization=regularization)
+
+    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=evaluator.evaluate_labels,
+                        ic_labels=ics_given,
+                        params_cv={'standardize_network': standardize_network,
+                                   'z_thresh': z_thresh,
+                                   'loo': do_loo,
+                                   'regularization': regularization,
+                                   'min_max_network': min_max_network})
+
+
+def retrieve_parameters(args):
     folder_ic = args['--folder_IC']
     labels_path = args['--path_labels']
     save_eval_name = set_file_name_eval(args['--save_file'])
-    standardize_networks = args['--standardize']
+    rescale_min_max = args['--rescale']
+    # global (across voxels) min-max scaling per subject implies standardization in our approach
+    if rescale_min_max:
+        standardize_networks = True
+    else:
+        standardize_networks = args['--standardize']
     z_thresh = float(args['--z_thresh'])
     do_loo = args['--loo']
-
-    y_labels = get_label(labels_path=labels_path)
-    ic_given = get_ic_nums(folder_path=folder_ic)
-    cv_instance = get_cv_instance(y_labels=y_labels, loo=do_loo)
-
-    eval_meta, eval_svm, eval_lab = perform_cross_validation(y_labels=y_labels, cv=cv_instance, ic_to_take=ic_given,
-                                                             folder_ic=folder_ic, standardize=standardize_networks,
-                                                             z_thresh=z_thresh)
-    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=eval_lab,
-                        ic_labels=ic_given, params_cv={'standardize_network': standardize_networks,
-                                                       'z_thresh': z_thresh,
-                                                       'loo': do_loo})
+    regularization = args['--reg']
+    return do_loo, folder_ic, labels_path, regularization, save_eval_name, rescale_min_max, standardize_networks, z_thresh
 
 
 if __name__ == '__main__':
