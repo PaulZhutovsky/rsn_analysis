@@ -26,7 +26,6 @@ from sklearn.cross_validation import StratifiedShuffleSplit, LeaveOneOut
 from sklearn.svm import SVC
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
-from sklearn.metrics import accuracy_score, roc_auc_score, f1_score, recall_score, precision_score
 import os.path as osp
 from glob import glob
 from time import time
@@ -35,14 +34,6 @@ from docopt import docopt
 
 
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
-
-
-def get_evaluation_labels(loo=False):
-    if loo:
-        return ['accuracy', 'predictions']
-    else:
-        return ['accuracy', 'balanced_accuracy', 'AUC', 'F1', 'recall', 'precision', 'sensitivity', 'specificity',
-                'positive_predictive_value']
 
 
 def get_ic_nums(folder_path):
@@ -78,24 +69,6 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
         log_reg = LogisticRegression(C=0., class_weight='balanced', solver='linlinear', n_jobs=10, verbose=1, **kwargs)
     log_reg.fit(data, labels)
     return log_reg
-
-
-def evaluate_prediction(y_true, y_pred, y_score):
-    accuracy = accuracy_score(y_true=y_true, y_pred=y_pred)
-    balanced_accuracy = 0.5 * (((y_true == 1) & (y_pred == 1)).mean() + ((y_true == 0) & (y_pred == 0)).mean())
-    auc = roc_auc_score(y_true=y_true, y_score=y_score)
-    f1 = f1_score(y_true=y_true, y_pred=y_pred)
-    recall = recall_score(y_true=y_true, y_pred=y_pred)
-    precision = precision_score(y_true=y_true, y_pred=y_pred)
-    sensitivity = recall
-    # noinspection PyTypeChecker
-    specificity = np.sum((y_true == 0) & (y_pred == 0))/float(np.sum(y_true == 0))
-    # noinspection PyTypeChecker
-    PPV = np.sum((y_true == 1) & (y_pred == 1))/float(np.sum(y_pred == 1))
-    if np.isnan(PPV):
-        PPV = 0.
-
-    return [accuracy, balanced_accuracy, auc, f1, recall, precision, sensitivity, specificity, PPV]
 
 
 def scale_data(train, test):
@@ -148,11 +121,6 @@ def feature_selection(train, test, y_train, z_thresh=3.5):
     return train[:, chosen_ftrs], test[:, chosen_ftrs]
 
 
-def print_evaluation(eval_metrics):
-    print 'Accuracy: {:.2f}, AUC: {:.2f}, F1-score: {:.2f}, Recall: {:.2f}, ' \
-          'Precision: {:.2f}, Sensitivity: {:.2f}, Specificity: {:.2f}, PPV: {:.2f}'.format(*eval_metrics)
-
-
 def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
     if loo:
         return LeaveOneOut(y_labels.size)
@@ -187,7 +155,6 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
             print "Current IC: {}/{}".format(id_IC + 1, num_ic)
 
             t1_ic = time()
-            import ipdb; ipdb.set_trace()
 
             ic_component = load_ic(osp.join(folder_ic, BASE_IC_NAME.format(ic_num)))
             # mask and scale the network on subject level if required
@@ -225,7 +192,7 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
 
         log_reg = build_classifier_lr(train_data_meta, label_train, regularization=regularization)
 
-        evaluations_metaclf[id_iter, :] = evaluator/evaluate_prediction(y_true=label_test,
+        evaluations_metaclf[id_iter, :] = evaluator.evaluate_prediction(y_true=label_test,
                                                                         y_pred=log_reg.predict(test_data_meta),
                                                                         y_score=log_reg.predict_proba(test_data_meta)[:, 1])
         evaluator.print_evaluation()
@@ -281,7 +248,8 @@ def retrieve_parameters(args):
     z_thresh = float(args['--z_thresh'])
     do_loo = args['--loo']
     regularization = args['--reg']
-    return do_loo, folder_ic, labels_path, regularization, save_eval_name, rescale_min_max, standardize_networks, z_thresh
+    return (do_loo, folder_ic, labels_path, regularization, save_eval_name,
+            rescale_min_max, standardize_networks, z_thresh)
 
 
 if __name__ == '__main__':
