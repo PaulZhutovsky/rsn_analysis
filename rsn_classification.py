@@ -66,7 +66,7 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
         log_reg = LogisticRegressionCV(penalty=regularization, Cs=100, cv=10, solver='liblinear', refit=False,
                                        n_jobs=10, verbose=1, class_weight='balanced', **kwargs)
     else:
-        log_reg = LogisticRegression(C=0., class_weight='balanced', solver='linlinear', n_jobs=10, verbose=1, **kwargs)
+        log_reg = LogisticRegression(C=0., class_weight='balanced', solver='liblinear', n_jobs=10, verbose=1, **kwargs)
     log_reg.fit(data, labels)
     return log_reg
 
