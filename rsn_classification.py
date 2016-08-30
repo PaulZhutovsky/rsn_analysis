@@ -226,7 +226,7 @@ def main(args):
                                                    z_thresh=z_thresh, min_max_network=min_max_network,
                                                    regularization=regularization)
 
-    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=evaluator.evaluate_labels,
+    np.savez_compressed(save_eval_name, eval_meta=eval_meta, eval_svm=eval_svm, eval_labels=evaluator.evaluate_labels(),
                         ic_labels=ics_given,
                         params_cv={'standardize_network': standardize_network,
                                    'z_thresh': z_thresh,
