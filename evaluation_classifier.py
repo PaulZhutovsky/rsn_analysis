@@ -30,7 +30,7 @@ class Evaluater(object):
             raise RuntimeError('evaluate has to be run first')
 
         if self.loo:
-            self.evaluation_string = 'Accuracy: {accuracy:.2f}, Prediction: {prediction}'.format(**self.results)
+            self.evaluation_string = 'Accuracy: {accuracy:.2f}'.format(**self.results)
         else:
             self.evaluation_string = 'Accuracy: {accuracy:.2f}, AUC: {AUC:.2f}, F1-score: {F1:.2f}, Recall: ' \
                                      '{recall:.2f}, Precision: {precision:.2f}, Sensitivity: {sensitivity:.2f}, ' \
@@ -40,7 +40,7 @@ class Evaluater(object):
 
     def set_evaluations(self):
         if self.loo:
-            evals = OrderedDict([('accuracy', accuracy_score), ('prediction', self.__return_prediction)])
+            evals = OrderedDict([('accuracy', accuracy_score)])
         else:
             evals = OrderedDict([('accuracy', accuracy_score),
                                  ('balanced_accuracy', self.__balanced_accuracy),
