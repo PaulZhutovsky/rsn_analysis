@@ -22,7 +22,7 @@ Options:
 
 import numpy as np
 import nibabel as nib
-from sklearn.cross_validation import StratifiedShuffleSplit, LeaveOneOut
+from sklearn.cross_validation import StratifiedShuffleSplit, StratifiedKFold
 from sklearn.svm import SVC
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
@@ -66,7 +66,9 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
         log_reg = LogisticRegressionCV(penalty=regularization, Cs=100, cv=10, solver='liblinear', refit=False,
                                        n_jobs=10, verbose=1, class_weight='balanced', **kwargs)
     else:
-        log_reg = LogisticRegression(C=0.000001, class_weight='balanced', solver='liblinear', n_jobs=10, verbose=1, **kwargs)
+        # lambda = 1/C:  if C->inf lambda -> 0. So if we want no regularization we need to set C to a high value
+        log_reg = LogisticRegression(C=100000000., class_weight='balanced', solver='liblinear', n_jobs=10,
+                                     verbose=1, **kwargs)
     log_reg.fit(data, labels)
     return log_reg
 
@@ -121,9 +123,23 @@ def feature_selection(train, test, y_train, z_thresh=3.5):
     return train[:, chosen_ftrs], test[:, chosen_ftrs]
 
 
+def is_balanced(labels):
+    return np.mod(labels.size, labels.sum()) == 0
+
+
 def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
     if loo:
-        return LeaveOneOut(y_labels.size)
+        # actually leave-one-subject-per-group-out
+
+        # first determine whether data is balanced
+        balanced = is_balanced(y_labels)
+
+        if balanced:
+            # just take two subjects out and use always two new subjects (do not use all combinations)
+            return StratifiedKFold(y_labels, n_folds=y_labels.size/2)
+        else:
+            #  Just create random subparts of your data for the unbalanced case.
+            return StratifiedShuffleSplit(y_labels, test_size=2, n_iter=50)
     else:
         return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
 
