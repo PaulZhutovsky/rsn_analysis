@@ -9,7 +9,7 @@ class Evaluater(object):
     def __init__(self, leave_one_out_case=False):
         self.loo = leave_one_out_case
         self.evaluations = self.set_evaluations()
-        self.results = {}
+        self.results = OrderedDict()
         self.evaluation_string = ''
 
     def evaluate(self, **kwargs):
@@ -40,7 +40,11 @@ class Evaluater(object):
 
     def set_evaluations(self):
         if self.loo:
-            evals = OrderedDict([('accuracy', accuracy_score)])
+            evals = OrderedDict([('accuracy', accuracy_score),
+                                 ('predictions_1st', self.__return_prediction_first),
+                                 ('predictions_2nd', self.__return_prediction_second),
+                                 ('true_1st', self.__return_true_first),
+                                 ('ture_2nd', self.__return_true_second)])
         else:
             evals = OrderedDict([('accuracy', accuracy_score),
                                  ('balanced_accuracy', self.__balanced_accuracy),
@@ -71,5 +75,17 @@ class Evaluater(object):
         return np.sum((y_true == 0) & (y_pred == 0)) / float(np.sum(y_true == 0))
 
     @staticmethod
-    def __return_prediction(y_pred):
-        return y_pred
+    def __return_prediction_first(y_pred):
+        return y_pred[0]
+
+    @staticmethod
+    def __return_prediction_second(y_pred):
+        return y_pred[1]
+
+    @staticmethod
+    def __return_true_first(y_true):
+        return y_true[1]
+
+    @staticmethod
+    def __return_true_second(y_true):
+        return y_true[1]
