@@ -59,7 +59,7 @@ class Evaluater(object):
 
     @staticmethod
     def __balanced_accuracy(y_true, y_pred):
-        return 0.5 * (((y_true == 1) & (y_pred == 1)).mean() + ((y_true == 0) & (y_pred == 0)).mean())
+        return 0.5 * (Evaluater.__specificity(y_true, y_pred) + recall_score(y_true, y_pred))
 
     @staticmethod
     def __ppv(y_true, y_pred):
