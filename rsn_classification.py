@@ -18,7 +18,7 @@ Options:
     --z_thresh=<Z_VAL>          What the z-threshold for the feature selection should be [default: 3.5]
     --loo                       Whether to use leave-one-out cross-validaton
     --reg=<REG>                 Which kind of regularization to apply for the meta-classifier. Valid options are:
-                                l1, l2, 0 [default: l2]
+                                l1, l2, 0 [default: l2] (Deprecated)
 """
 
 import os.path as osp
@@ -28,7 +28,7 @@ import numpy as np
 from docopt import docopt
 
 from data_utils import get_ic_nums, load_ic, load_mask, mask_data, get_label, set_file_name_eval
-from ml_utils import build_classifier_svm, build_classifier_lr, scale_data, feature_selection, get_cv_instance
+from ml_utils import build_classifier_svm, build_classifier_rf, scale_data, feature_selection, get_cv_instance
 from evaluation_classifier import Evaluater
 
 BASE_IC_NAME = 'dr_stage2_ic{:04}.nii.gz'
@@ -80,7 +80,7 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
                                                                                               ic_test.min(axis=0).max())
 
             svm_clf, data_for_metaclf[train_index, id_IC] = build_classifier_svm(ic_train, label_train)
-            data_for_metaclf[test_index, id_IC] = svm_clf.decision_function(ic_test)
+            data_for_metaclf[test_index, id_IC] = svm_clf.predict_proba(ic_test)[:, svm_clf.classes_ == 1]
 
             evaluation_svm[id_iter, id_IC, :] = evaluator.evaluate_prediction(y_true=label_test,
                                                                               y_pred=svm_clf.predict(ic_test),
@@ -98,12 +98,12 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
         train_data_meta = data_for_metaclf[train_index, :]
         test_data_meta = data_for_metaclf[test_index, :]
 
-        log_reg = build_classifier_lr(train_data_meta, label_train, regularization=regularization)
-
+        # log_reg = build_classifier_lr(train_data_meta, label_train, regularization=regularization)
+        rf_clf =  build_classifier_rf(train_data_meta, label_train)
         evaluations_metaclf[id_iter, :] = evaluator.evaluate_prediction(y_true=label_test,
-                                                                        y_pred=log_reg.predict(test_data_meta),
-                                                                        y_score=log_reg.predict_proba(
-                                                                            test_data_meta)[:, 1])
+                                                                        y_pred=rf_clf.predict(test_data_meta),
+                                                                        y_score=rf_clf.predict_proba(test_data_meta)[:,
+                                                                                rf_clf.classes_ == 1])
         evaluator.print_evaluation()
     print 'Total Time: {:.2f}min'.format((time() - t1_total)/60.)
     return evaluations_metaclf, evaluation_svm
