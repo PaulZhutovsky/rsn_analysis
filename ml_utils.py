@@ -1,14 +1,16 @@
 import numpy as np
-from sklearn.cross_validation import StratifiedKFold, StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVC
 
 
 def build_classifier_svm(data, labels, kernel='linear', class_weight='balanced', **kwargs):
-    svm = SVC(kernel=kernel, class_weight=class_weight, **kwargs)
+    svm = SVC(kernel=kernel, class_weight=class_weight, probability=True, **kwargs)
     svm.fit(data, labels)
-    return svm, svm.decision_function(data)
+    id_pos_class = svm.classes_ == labels.max()
+    return svm, svm.predict_proba(data)[:, id_pos_class]
 
 
 def build_classifier_lr(data, labels, regularization='l2', **kwargs):
@@ -21,6 +23,12 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
                                      verbose=1, **kwargs)
     log_reg.fit(data, labels)
     return log_reg
+
+
+def build_classifier_rf(data, labels, **kwargs):
+    rf_clf = RandomForestClassifier(n_estimators=100, **kwargs)
+    rf_clf.fit(data, labels)
+    return rf_clf
 
 
 def scale_data(train, test):
@@ -63,9 +71,9 @@ def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
 
         if balanced:
             # just take two subjects out and use always two new subjects (do not use all combinations)
-            return StratifiedKFold(y_labels, n_folds=y_labels.size/2)
+            return StratifiedKFold(n_splits=y_labels.size/2)
         else:
             #  Just create random subparts of your data for the unbalanced case.
-            return StratifiedShuffleSplit(y_labels, test_size=2, n_iter=50)
+            return StratifiedShuffleSplit(test_size=2, n_splits=50)
     else:
-        return StratifiedShuffleSplit(y=y_labels, n_iter=n_iter, test_size=test_size)
+        return StratifiedShuffleSplit(n_splits=n_iter, test_size=test_size)
