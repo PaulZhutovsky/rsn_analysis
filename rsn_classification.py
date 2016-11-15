@@ -25,6 +25,7 @@ import os.path as osp
 from time import time
 
 import numpy as np
+from sklearn.externals.joblib import Parallel, delayed
 from docopt import docopt
 
 from data_utils import get_ic_nums, load_ic, load_mask, mask_data, get_label, set_file_name_eval
@@ -57,39 +58,16 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
 
         label_train, label_test = y_labels[train_index], y_labels[test_index]
 
-        for id_IC, ic_num in enumerate(ic_to_take):
-            print
-            print "Current IC: {}/{}".format(id_IC + 1, num_ic)
+        results = Parallel(n_jobs=10, verbose=1)(delayed(fit_one_IC)(num_subj, evaluator, folder_ic, ic_num, id_IC,
+                                                                     id_iter, label_test, label_train, mask, num_ic,
+                                                                     range_correct_network, standardize_network,
+                                                                     test_index, train_index, z_thresh)
+                                                 for id_IC, ic_num in enumerate(ic_to_take))
 
-            t1_ic = time()
+        for i in xrange(len(results)):
+            data_for_metaclf[:, i] = results[i][0]
+            evaluation_svm[id_iter, i, :] = results[i][1]
 
-            ic_component = load_ic(osp.join(folder_ic, BASE_IC_NAME.format(ic_num)))
-            # mask and scale the network on subject level if required
-            ic_component = mask_data(ic_component, mask, standardize_network=standardize_network,
-                                     range_correct=range_correct_network)
-
-            ic_train, ic_test = ic_component[train_index, :], ic_component[test_index, :]
-
-            ic_train, ic_test = feature_selection(ic_train, ic_test, label_train, z_thresh=z_thresh)
-            ic_train, ic_test = scale_data(ic_train, ic_test)
-
-            print 'Train Set: max={:.2f}, min={:.2f}'.format(ic_train.max(), ic_train.min())
-            print 'Test Set: max(range)=[{:.2f}, {:.2f}], min(range)=[{:.2f}, {:.2f}]'.format(ic_test.max(axis=0).min(),
-                                                                                              ic_test.max(),
-                                                                                              ic_test.min(),
-                                                                                              ic_test.min(axis=0).max())
-
-            svm_clf, data_for_metaclf[train_index, id_IC] = build_classifier_svm(ic_train, label_train)
-            data_for_metaclf[test_index, id_IC] = svm_clf.predict_proba(ic_test)[:, svm_clf.classes_ == 1]
-
-            evaluation_svm[id_iter, id_IC, :] = evaluator.evaluate_prediction(y_true=label_test,
-                                                                              y_pred=svm_clf.predict(ic_test),
-                                                                              y_score=svm_clf.decision_function(
-                                                                                  ic_test))
-            print 'SVM evaluation:'
-            evaluator.print_evaluation()
-
-            print 'Time IC: {:.2f}s'.format(time() - t1_ic)
 
         print 'Time Iteration: {:.2f}m'.format((time() - t1_iter)/60)
 
@@ -98,7 +76,6 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
         train_data_meta = data_for_metaclf[train_index, :]
         test_data_meta = data_for_metaclf[test_index, :]
 
-        # log_reg = build_classifier_lr(train_data_meta, label_train, regularization=regularization)
         rf_clf =  build_classifier_rf(train_data_meta, label_train)
         evaluations_metaclf[id_iter, :] = evaluator.evaluate_prediction(y_true=label_test,
                                                                         y_pred=rf_clf.predict(test_data_meta),
@@ -107,6 +84,34 @@ def perform_cross_validation(y_labels, cv, ic_to_take, folder_ic, evaluator, sta
         evaluator.print_evaluation()
     print 'Total Time: {:.2f}min'.format((time() - t1_total)/60.)
     return evaluations_metaclf, evaluation_svm
+
+
+def fit_one_IC(num_subj, evaluator, folder_ic, ic_num, id_IC, id_iter, label_test, label_train,
+               mask, num_ic, range_correct_network, standardize_network, test_index, train_index, z_thresh):
+    data_for_metaclf = np.zeros(num_subj)
+    print
+    print "Current IC: {}/{}".format(id_IC + 1, num_ic)
+    t1_ic = time()
+    ic_component = load_ic(osp.join(folder_ic, BASE_IC_NAME.format(ic_num)))
+    # mask and scale the network on subject level if required
+    ic_component = mask_data(ic_component, mask, standardize_network=standardize_network,
+                             range_correct=range_correct_network)
+    ic_train, ic_test = ic_component[train_index, :], ic_component[test_index, :]
+    ic_train, ic_test = feature_selection(ic_train, ic_test, label_train, z_thresh=z_thresh)
+    ic_train, ic_test = scale_data(ic_train, ic_test)
+    print 'Train Set: max={:.2f}, min={:.2f}'.format(ic_train.max(), ic_train.min())
+    print 'Test Set: max(range)=[{:.2f}, {:.2f}], min(range)=[{:.2f}, {:.2f}]'.format(ic_test.max(axis=0).min(),
+                                                                                      ic_test.max(),
+                                                                                      ic_test.min(),
+                                                                                      ic_test.min(axis=0).max())
+    svm_clf, data_for_metaclf[train_index, id_IC] = build_classifier_svm(ic_train, label_train)
+    data_for_metaclf[test_index, id_IC] = svm_clf.predict_proba(ic_test)[:, svm_clf.classes_ == 1]
+    evaluation_svm = evaluator.evaluate_prediction(y_true=label_test, y_pred=svm_clf.predict(ic_test),
+                                                   y_score=svm_clf.decision_function(ic_test))
+    print 'SVM evaluation:'
+    evaluator.print_evaluation()
+    print 'Time IC: {:.2f}s'.format(time() - t1_ic)
+    return data_for_metaclf, evaluation_svm
 
 
 def retrieve_parameters(args):
