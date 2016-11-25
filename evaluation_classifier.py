@@ -4,6 +4,47 @@ import inspect
 from collections import OrderedDict
 
 
+def balanced_accuracy(y_true, y_pred):
+    return 0.5 * (specificity(y_true, y_pred) + recall_score(y_true, y_pred))
+
+
+def ppv(y_true, y_pred):
+    # noinspection PyTypeChecker
+    ppv_score = np.sum((y_true == 1) & (y_pred == 1)) / np.sum(y_pred == 1, dtype=np.float)
+    if np.isnan(ppv_score):
+        return 0
+    return ppv_score
+
+
+def npv(y_true, y_pred):
+    # noinspection PyTypeChecker
+    npv_score = np.sum((y_true == 0) & (y_pred == 0)) / np.sum(y_pred == 0, dtype=np.float)
+    if np.isnan(npv_score):
+        return 0
+    return npv_score
+
+
+def specificity(y_true, y_pred):
+    # noinspection PyTypeChecker
+    return np.sum((y_true == 0) & (y_pred == 0)) / np.sum(y_true == 0, dtype=np.float)
+
+
+def return_prediction_first(y_pred):
+    return y_pred[0]
+
+
+def return_prediction_second(y_pred):
+    return y_pred[1]
+
+
+def return_true_first(y_true):
+    return y_true[1]
+
+
+def return_true_second(y_true):
+    return y_true[1]
+
+
 class Evaluater(object):
 
     def __init__(self, leave_one_out_case=False):
@@ -32,60 +73,70 @@ class Evaluater(object):
         if self.loo:
             self.evaluation_string = 'Accuracy: {accuracy:.2f}'.format(**self.results)
         else:
-            self.evaluation_string = 'Accuracy: {accuracy:.2f}, AUC: {AUC:.2f}, F1-score: {F1:.2f}, Recall: ' \
+            self.evaluation_string = 'Accuracy: {balanced_accuracy:.2f}, AUC: {AUC:.2f}, F1-score: {F1:.2f}, Recall: ' \
                                      '{recall:.2f}, Precision: {precision:.2f}, Sensitivity: {sensitivity:.2f}, ' \
                                      'Specificity: {specificity:.2f}, ' \
-                                     'PPV: {positive_predictive_value:.2f}'.format(**self.results)
+                                     'PPV: {positive_predictive_value:.2f}, ' \
+                                     'NPV: {negative_predictive_value:.2f}'.format(**self.results)
         print self.evaluation_string
 
     def set_evaluations(self):
         if self.loo:
             evals = OrderedDict([('accuracy', accuracy_score),
-                                 ('predictions_1st', self.__return_prediction_first),
-                                 ('predictions_2nd', self.__return_prediction_second),
-                                 ('true_1st', self.__return_true_first),
-                                 ('ture_2nd', self.__return_true_second)])
+                                 ('predictions_1st', return_prediction_first),
+                                 ('predictions_2nd', return_prediction_second),
+                                 ('true_1st', return_true_first),
+                                 ('true_2nd', return_true_second)])
         else:
             evals = OrderedDict([('accuracy', accuracy_score),
-                                 ('balanced_accuracy', self.__balanced_accuracy),
+                                 ('balanced_accuracy', balanced_accuracy),
                                  ('AUC', roc_auc_score),
                                  ('F1', f1_score),
                                  ('recall', recall_score),
                                  ('precision', precision_score),
                                  ('sensitivity', recall_score),           # recall is the same as sensitivity
-                                 ('specificity', self.__specificity),
-                                 ('positive_predictive_value', self.__ppv)])
+                                 ('specificity', specificity),
+                                 ('positive_predictive_value', ppv),
+                                 ('negative_predictive_value', npv)])
         return evals
 
-    @staticmethod
-    def __balanced_accuracy(y_true, y_pred):
-        return 0.5 * (Evaluater.__specificity(y_true, y_pred) + recall_score(y_true, y_pred))
+    # @staticmethod
+    # def balanced_accuracy(y_true, y_pred):
+    #     return 0.5 * (Evaluater.__specificity(y_true, y_pred) + recall_score(y_true, y_pred))
 
-    @staticmethod
-    def __ppv(y_true, y_pred):
-        # noinspection PyTypeChecker
-        ppv = np.sum((y_true == 1) & (y_pred == 1)) / float(np.sum(y_pred == 1))
-        if np.isnan(ppv):
-            return 0
-        return ppv
-
-    @staticmethod
-    def __specificity(y_true, y_pred):
-        # noinspection PyTypeChecker
-        return np.sum((y_true == 0) & (y_pred == 0)) / float(np.sum(y_true == 0))
-
-    @staticmethod
-    def __return_prediction_first(y_pred):
-        return y_pred[0]
-
-    @staticmethod
-    def __return_prediction_second(y_pred):
-        return y_pred[1]
-
-    @staticmethod
-    def __return_true_first(y_true):
-        return y_true[1]
-
-    @staticmethod
-    def __return_true_second(y_true):
-        return y_true[1]
+    # @staticmethod
+    # def ppv(y_true, y_pred):
+    #     # noinspection PyTypeChecker
+    #     ppv = np.sum((y_true == 1) & (y_pred == 1)) / np.sum(y_pred == 1, dtype=np.float)
+    #     if np.isnan(ppv):
+    #         return 0
+    #     return ppv
+    #
+    # @staticmethod
+    # def npv(y_true, y_pred):
+    #     # noinspection PyTypeChecker
+    #     npv = np.sum((y_true == 0) & (y_pred == 0)) / np.sum(y_pred == 0, dtype=np.float)
+    #     if np.isnan(npv):
+    #         return 0
+    #     return npv
+    #
+    # @staticmethod
+    # def specificity(y_true, y_pred):
+    #     # noinspection PyTypeChecker
+    #     return np.sum((y_true == 0) & (y_pred == 0)) / np.sum(y_true == 0, dtype=np.float)
+    #
+    # @staticmethod
+    # def return_prediction_first(y_pred):
+    #     return y_pred[0]
+    #
+    # @staticmethod
+    # def return_prediction_second(y_pred):
+    #     return y_pred[1]
+    #
+    # @staticmethod
+    # def return_true_first(y_true):
+    #     return y_true[1]
+    #
+    # @staticmethod
+    # def return_true_second(y_true):
+    #     return y_true[1]

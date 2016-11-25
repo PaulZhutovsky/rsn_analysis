@@ -12,7 +12,7 @@ def get_ic_nums(folder_path):
     :param folder_path:
     :return:
     """
-    networks_files = np.array(glob(osp.join(folder_path, 'dr_stage2_ic*.nii.gz')))
+    networks_files = np.array(sorted(glob(osp.join(folder_path, 'dr_stage2_ic*.nii.gz'))))
     # remove .nii.gz
     networks_files_no_file_ext = np.char.partition(networks_files, '.')[:, 0]
     # get ic# (e.g. ic0001) using _right_ partition
@@ -39,13 +39,13 @@ def mask_data(ic_network, mask, standardize_network=False, range_correct=False):
 
     # Idea proposed by Rajat: standardize each network for each subject individually before normalizing the features
     if standardize_network:
-        network = (network - network.mean(axis=1)[:, np.newaxis]) / network.std(axis=1)[:, np.newaxis]
+        network = (network - network.mean(axis=1, keepdims=True)) / network.std(axis=1, keepdims=True)
 
     # 2nd idea proposed by Guido/Rajat: rescale the networks per subject to be exactly in the same range (-1, 1)
     if range_correct:
         # 0-1 scale
-        network = (network - network.min(axis=1)[:, np.newaxis]) / (network.max(axis=1)[:, np.newaxis] -
-                                                                    network.min(axis=1)[:, np.newaxis])
+        network = (network - network.min(axis=1, keepdims=True)) / (network.max(axis=1, keepdims=True) -
+                                                                    network.min(axis=1, keepdims=True))
         # -1-1 scale
         network = network * 2. - 1.
 

@@ -3,7 +3,15 @@ from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegressionCV, LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import recall_score, make_scorer
 from sklearn.svm import SVC
+
+
+def balanced_accuracy(y, y_pred, **kwargs):
+    sensitivity = recall_score(y, y_pred)
+    specificity = np.sum((y == 0) & (y_pred == 0), dtype=np.float) / np.sum(y == 0, dtype=np.float)
+    return 0.5 * (sensitivity + specificity)
 
 
 def build_classifier_svm(data, labels, kernel='linear', class_weight='balanced', **kwargs):
@@ -26,9 +34,13 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
 
 
 def build_classifier_rf(data, labels, **kwargs):
-    rf_clf = RandomForestClassifier(n_estimators=100, **kwargs)
-    rf_clf.fit(data, labels)
-    return rf_clf
+    rf_clf = RandomForestClassifier(**kwargs)
+    params_rf = {'n_estimators': np.arange(10, 200, 20), 'max_features': ['sqrt', 'log2', 0.5, 0.75]}
+    balanced_acc_scorer = make_scorer(balanced_accuracy)
+    cv = StratifiedKFold(n_splits=5, shuffle=True)
+    grid_search = GridSearchCV(rf_clf, params_rf, scoring=balanced_acc_scorer, cv=cv, refit=True, verbose=1, n_jobs=10)
+    grid_search.fit(data, labels)
+    return grid_search, grid_search.cv_results_, grid_search.best_params_
 
 
 def scale_data(train, test):
@@ -46,8 +58,8 @@ def scale_data(train, test):
 
 
 def feature_selection(train, test, y_train, z_thresh=3.5):
-    mean_group_1 = train[y_train.astype('bool')].mean(axis=0)
-    mean_group_2 = train[~y_train.astype('bool')].mean(axis=0)
+    mean_group_1 = train[y_train == 1].mean(axis=0)
+    mean_group_2 = train[y_train == 0].mean(axis=0)
 
     mean_diffs = mean_group_1 - mean_group_2
     z_scores_diffs = (mean_diffs - mean_diffs.mean())/mean_diffs.std()
@@ -63,17 +75,17 @@ def is_balanced(labels):
 
 
 def get_cv_instance(y_labels, n_iter=1000, test_size=0.2, loo=False):
-    if loo:
-        # actually leave-one-subject-per-group-out
-
-        # first determine whether data is balanced
-        balanced = is_balanced(y_labels)
-
-        if balanced:
-            # just take two subjects out and use always two new subjects (do not use all combinations)
-            return StratifiedKFold(n_splits=y_labels.size/2)
-        else:
-            #  Just create random subparts of your data for the unbalanced case.
-            return StratifiedShuffleSplit(test_size=2, n_splits=50)
-    else:
+    if not loo:
         return StratifiedShuffleSplit(n_splits=n_iter, test_size=test_size)
+
+    # actually leave-one-subject-PER-GROUP-out
+    # first determine whether data is balanced
+    balanced = is_balanced(y_labels)
+
+    if balanced:
+        # just take two subjects out and use always two new subjects (do not use all combinations)
+        return StratifiedKFold(n_splits=y_labels/2)
+    else:
+        #  Just create random subparts of your data for the unbalanced case.
+        return StratifiedShuffleSplit(test_size=2, n_splits=50)
+
