@@ -6,6 +6,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import recall_score, make_scorer
 from sklearn.svm import SVC
+from sklearn.gaussian_process import GaussianProcessClassifier
+from sklearn.gaussian_process.kernels import  DotProduct, Product, Sum, ConstantKernel
 
 
 def balanced_accuracy(y, y_pred, **kwargs):
@@ -33,12 +35,21 @@ def build_classifier_lr(data, labels, regularization='l2', **kwargs):
     return log_reg
 
 
+def build_classifier_gp(data, labels, **kwargs):
+    linear_kernel = Sum(k1=Product(k1=DotProduct(sigma_0=0, sigma_0_bounds='fixed'), k2=ConstantKernel()),
+                        k2=ConstantKernel())
+    gp_clf = GaussianProcessClassifier(kernel=linear_kernel)
+    gp_clf.fit(data, labels)
+    id_pos_class = gp_clf.classes_ == labels.max()
+    return gp_clf, gp_clf.predict_proba(data)[:, id_pos_class]
+
+
 def build_classifier_rf(data, labels, **kwargs):
     rf_clf = RandomForestClassifier(**kwargs)
     params_rf = {'n_estimators': np.arange(10, 200, 20), 'max_features': ['sqrt', 'log2', 0.5, 0.75]}
     balanced_acc_scorer = make_scorer(balanced_accuracy)
     cv = StratifiedKFold(n_splits=5, shuffle=True)
-    grid_search = GridSearchCV(rf_clf, params_rf, scoring=balanced_acc_scorer, cv=cv, refit=True, verbose=1, n_jobs=10)
+    grid_search = GridSearchCV(rf_clf, params_rf, scoring=balanced_acc_scorer, cv=cv, refit=True, verbose=1, n_jobs=15)
     grid_search.fit(data, labels)
     return grid_search, grid_search.cv_results_, grid_search.best_params_
 

@@ -7,7 +7,7 @@ USAGE:
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from rsn_classification import load_IC
+from data_utils import load_ic
 from rsn_classification import BASE_IC_NAME
 import os.path as osp
 import os
@@ -87,7 +87,7 @@ def main(args):
     for id_rsn, ic_num in enumerate(ic_nums):
         print '{}/{}'.format(id_rsn + 1, ic_nums.size)
         path_rsn = osp.join(folder_rsn, get_ic_filename(ic_num))
-        IC_network = load_IC(path_rsn)
+        IC_network = load_ic(path_rsn)
         IC_network = reshape_network(IC_network)
         IC_network = remove_zeros(IC_network)
 

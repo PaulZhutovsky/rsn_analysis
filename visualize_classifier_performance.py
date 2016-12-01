@@ -29,11 +29,15 @@ def make_boxplot(data, ylabel, xlabel, title, file_name):
     plt.savefig(file_name)
 
 
-def make_hist(data, xlabel, title, file_name, bins=20):
+def make_hist(data, xlabel, title, file_name, bins=10):
     plt.hist(data, bins=bins)
     plt.xlabel(xlabel, fontsize=18)
     plt.title(title, fontsize=20)
-    plt.vlines(0.5, ymin=0, ymax=10000, colors='r', linewidth=2.0)
+    plt.vlines(0.5, ymin=0, ymax=10000, colors='0.75', linewidth=2.0)
+    mean, std = data.mean(), data.std()
+    plt.vlines(mean, ymin=0, ymax=10000, colors='r', linewidth=2.0)
+    plt.vlines(mean - std, ymin=0, ymax=10000, colors='g', linewidth=2.0)
+    plt.vlines(mean + std, ymin=0, ymax=10000, colors='g', linewidth=2.0)
     plt.ylim([0, 300])
     figManager = plt.get_current_fig_manager()
     figManager.window.showMaximized()
@@ -44,20 +48,18 @@ def main(args):
     path_eval = args['PATH_EVAL']
     figure_path = args['FIGURE_PATH']
     check_folder(figure_path)
-    eval_svm, eval_meta, eval_labels = load_eval_file(path_eval)
+    eval_indv, eval_meta, eval_labels = load_eval_file(path_eval)
 
     for id_eval, eval in enumerate(eval_labels):
 
         plt.figure(figsize=(20, 10))
-        make_boxplot(eval_svm[..., id_eval], ylabel='distribution {}'.format(eval), xlabel='RSNs', title=eval,
-                     file_name=osp.join(figure_path, 'svm_{}.png'.format(eval)))
+        make_boxplot(eval_indv[..., id_eval], ylabel='distribution {}'.format(eval), xlabel='RSNs', title=eval,
+                     file_name=osp.join(figure_path, 'indv_{}.png'.format(eval)))
 
         plt.figure()
         make_hist(eval_meta[:, id_eval], xlabel=eval, title='meta: {}'.format(eval),
                   file_name=osp.join(figure_path, 'meta_{}.png'.format(eval)))
         plt.close('all')
-
-
 
 
 if __name__ == '__main__':

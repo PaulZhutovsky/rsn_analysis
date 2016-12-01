@@ -1,9 +1,16 @@
 from glob import glob
-from os import path as osp
+import os.path as osp
+import os
 from time import time
 
 import nibabel as nib
 import numpy as np
+import pandas as pd
+
+
+def check_folder(folder_path):
+    if not osp.exists(folder_path):
+        os.makedirs(folder_path)
 
 
 def get_ic_nums(folder_path):
@@ -52,9 +59,11 @@ def mask_data(ic_network, mask, standardize_network=False, range_correct=False):
     return network
 
 
-def get_label(labels_path):
-    return np.loadtxt(labels_path).astype(np.int)
-
+def get_labels_covariates(labels_path):
+    df =  pd.read_csv(labels_path)
+    y = df.patients.values
+    gender = df.gender.values
+    return y, gender
 
 def set_file_name_eval(file_name):
     if file_name:
